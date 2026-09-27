@@ -1,6 +1,6 @@
 # pkg_lang_info
 
-A small Unix utility (C, no dependencies) that shows which **package managers** and
+A small Unix utility (C++, no dependencies) that shows which **package managers** and
 **programming languages / runtimes** are installed on your system, along with their
 versions.
 
@@ -30,10 +30,10 @@ cmake --build build -j
 Option B — plain compiler:
 
 ```bash
-cc -std=c99 -O2 -Wall -Wextra -o pkg_lang_info pkg_lang_info.c
+g++ -std=c++17 -O2 -Wall -Wextra -Iinclude -o pkg_lang_info src/main.cpp src/helpers.cpp src/tables.cpp src/output.cpp
 ```
 
-Requirements: any POSIX C compiler (gcc, clang, ...). No other dependencies.
+Requirements: any POSIX C++ compiler (g++, clang++, ...). No other dependencies.
 
 ## How to run
 
@@ -95,10 +95,16 @@ Node.js                    node       v20.11.1
 
 ## Files
 
-| File               | Purpose                          |
-| ------------------ | -------------------------------- |
-| `pkg_lang_info.c`  | the whole program (single file)  |
-| `CMakeLists.txt`   | CMake build configuration        |
+| File                | Purpose                                              |
+| ------------------- | ---------------------------------------------------- |
+| `include/helpers.h` | declarations: PATH lookup, command output, JSON escaping |
+| `src/helpers.cpp`   | implementation of the shared helpers                 |
+| `include/tables.h`  | declarations of the package-manager/language tables  |
+| `src/tables.cpp`    | the static tables of tools to probe                  |
+| `include/output.h`  | declarations: probing, JSON/table output             |
+| `src/output.cpp`    | probing + JSON and table printing                    |
+| `src/main.cpp`      | argument parsing and `main()`                        |
+| `CMakeLists.txt`    | CMake build configuration                            |
 
 ## Roadmap
 
