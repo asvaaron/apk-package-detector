@@ -1,7 +1,7 @@
 # Build and Debug Packages
 
 build
-cmake-build-d
+cmake-build-debug
 
 # IDEA
 .idea

@@ -83,6 +83,9 @@ int first_line(const char *command, const char *filter,
 /* Escape s for safe use inside a JSON string literal. */
 void json_escape(const char *s, char *out, std::size_t out_size)
 {
+    if (out_size == 0)
+        return;
+
     std::size_t o = 0;
     for (const unsigned char *p = (const unsigned char *)s; *p; p++) {
         const char *rep = nullptr;
@@ -91,13 +94,8 @@ void json_escape(const char *s, char *out, std::size_t out_size)
         switch (*p) {
         case '"':  rep = "\\\""; break;
         case '\\': rep = "\\\\"; break;
-        case '\b': rep = "\\b";  break;
-        case '\f': rep = "\\f";  break;
-        case '\n': rep = "\\n";  break;
-        case '\r': rep = "\\r";  break;
-        case '\t': rep = "\\t";  break;
         default:
-            if (*p < 0x20) {            /* other control chars -> \u00XX */
+            if (*p < 0x20) {            /* all control chars -> \u00XX */
                 snprintf(esc, sizeof esc, "\\u%04x", *p);
                 rep = esc;
             }
@@ -105,14 +103,14 @@ void json_escape(const char *s, char *out, std::size_t out_size)
         }
 
         if (rep == nullptr) {           /* plain byte */
-            if (o + 1 > out_size)
+            if (o + 1 >= out_size)      /* keep room for the terminator */
                 break;
             out[o++] = (char)*p;
             continue;
         }
 
         std::size_t len = strlen(rep);
-        if (o + len > out_size)
+        if (o + len + 1 > out_size)     /* keep room for the terminator */
             break;
         memcpy(out + o, rep, len);
         o += len;

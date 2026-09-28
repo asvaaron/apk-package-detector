@@ -1,197 +1,134 @@
 /*
  * output.cpp
  *
- * Probing installed tools and printing the results, either as JSON
- * (script-friendly) or as a human-readable table.
+ * Probing and display logic for pkg_lang_info: runs each version command,
+ * remembers the results, and renders them as a table or JSON.
  */
 
-/* Needed for gmtime_r() when not already in gnu++ mode. */
-#ifndef _GNU_SOURCE
-#define _GNU_SOURCE
-#endif
-
 #include "output.h"
-
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <ctime>
-#include <sys/utsname.h>
-
+#include "tables.h"
 #include "helpers.h"
 
-/* ------------------------------------------------------------------ */
-/* Probing                                                            */
-/* ------------------------------------------------------------------ */
+#include <cstdio>
 
-/* Probe one tool: is it installed? what does it report as its version? */
+namespace {
+
+constexpr int kMaxResults = 128;
+
+/* Results are stored in call order: managers first, then languages. */
+struct result g_results[kMaxResults];
+int g_n_results = 0;
+
+/* Return the result recorded at index i, or nullptr if out of range. */
+const struct result *result_at(std::size_t i)
+{
+    return (i < static_cast<std::size_t>(g_n_results)) ? &g_results[i] : nullptr;
+}
+
+} // namespace
+
+/*
+ * Probe one tool: check the binary is on $PATH, then run its version
+ * command and capture the first matching line. The result is appended to
+ * the internal table and a pointer to it is returned.
+ */
 struct result *probe(const char *binary, const char *version_cmd,
                      const char *filter)
 {
-    struct result *r =
-        static_cast<struct result *>(calloc(1, sizeof *r));
-    if (r == nullptr)
-        return nullptr;
-    r->found = in_path(binary);
-    if (r->found &&
-        !first_line(version_cmd, filter, r->version, sizeof r->version))
-        r->version[0] = '\0';
-    return r;
+    struct result r;
+    r.found = 0;
+    r.version[0] = '\0';
+
+    if (in_path(binary) != 0) {
+        char line[512];
+        if (first_line(version_cmd, filter, line, sizeof line) != 0) {
+            r.found = 1;
+            std::snprintf(r.version, sizeof r.version, "%s", line);
+        }
+    }
+
+    if (g_n_results >= kMaxResults)
+        return nullptr; /* table overflow: drop this entry */
+
+    g_results[g_n_results] = r;
+    return &g_results[g_n_results++];
 }
 
-/* ------------------------------------------------------------------ */
-/* JSON output                                                        */
-/* ------------------------------------------------------------------ */
-
-static void json_entry(const char *name, const char *binary,
-                       const struct result *r, int last)
+/* Render the collected results as a JSON document. */
+void print_json(const struct pkg_mgr *mgrs, std::size_t n_mgrs,
+                const struct lang *langs, std::size_t n_langs)
 {
-    char name_e[512], bin_e[512], ver_e[2048];
-    json_escape(name, name_e, sizeof name_e);
-    json_escape(binary, bin_e, sizeof bin_e);
-    json_escape(r->found ? r->version : "", ver_e, sizeof ver_e);
+    std::printf("{\n");
 
-    printf("    { \"name\": \"%s\", \"binary\": \"%s\", "
-           "\"installed\": %s, \"version\": \"%s\" }%s\n",
-           name_e, bin_e, r->found ? "true" : "false", ver_e,
-           last ? "" : ",");
+    std::printf("  \"package_managers\": [\n");
+    for (std::size_t i = 0; i < n_mgrs; i++) {
+        const struct result *r = result_at(i);
+        char name[512], bin[512], ver[512];
+        json_escape(mgrs[i].name, name, sizeof name);
+        json_escape(mgrs[i].binary, bin, sizeof bin);
+        json_escape((r != nullptr && r->found) ? r->version : "", ver, sizeof ver);
+        std::printf("    { \"name\": \"%s\", \"binary\": \"%s\", "
+                    "\"installed\": %s, \"version\": \"%s\" }%s\n",
+                    name, bin, (r != nullptr && r->found) ? "true" : "false",
+                    ver, (i + 1 < n_mgrs) ? "," : "");
+    }
+    std::printf("  ],\n");
+
+    std::printf("  \"languages\": [\n");
+    for (std::size_t i = 0; i < n_langs; i++) {
+        const struct result *r = result_at(n_mgrs + i);
+        char name[512], bin[512], ver[512];
+        json_escape(langs[i].name, name, sizeof name);
+        json_escape(langs[i].binary, bin, sizeof bin);
+        json_escape((r != nullptr && r->found) ? r->version : "", ver, sizeof ver);
+        std::printf("    { \"name\": \"%s\", \"binary\": \"%s\", "
+                    "\"installed\": %s, \"version\": \"%s\" }%s\n",
+                    name, bin, (r != nullptr && r->found) ? "true" : "false",
+                    ver, (i + 1 < n_langs) ? "," : "");
+    }
+    std::printf("  ]\n");
+
+    std::printf("}\n");
 }
 
-void print_json(const struct pkg_mgr *mgrs, std::size_t mgr_count,
-                const struct lang *langs, std::size_t lang_count)
+/* Render the collected results as an aligned text table. */
+void print_table(const struct pkg_mgr *mgrs, std::size_t n_mgrs,
+                 const struct lang *langs, std::size_t n_langs)
 {
-    struct utsname u;
-    char sys_e[256], rel_e[256], mach_e[256], ts[64];
-    int have_u = (uname(&u) == 0);
+    std::printf("%-24s %-12s %s\n", "NAME", "BINARY", "VERSION");
+    std::printf("------------------------------- -------------- "
+                "------------------------------\n");
 
-    if (have_u) {
-        json_escape(u.sysname, sys_e, sizeof sys_e);
-        json_escape(u.release, rel_e, sizeof rel_e);
-        json_escape(u.machine, mach_e, sizeof mach_e);
-    } else {
-        snprintf(sys_e, sizeof sys_e, "unknown");
-        rel_e[0] = '\0';
-        mach_e[0] = '\0';
+    for (std::size_t i = 0; i < n_mgrs; i++) {
+        const struct result *r = result_at(i);
+        if (r != nullptr && r->found)
+            std::printf("%-24s %-12s %s\n", mgrs[i].name, mgrs[i].binary,
+                        r->version);
+        else
+            std::printf("%-24s %-12s (not installed)\n", mgrs[i].name,
+                        mgrs[i].binary);
     }
 
-    time_t now = time(nullptr);
-    struct tm tmv;
-    gmtime_r(&now, &tmv);
-    strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+    std::printf("\n");
 
-    /* Probe everything first so the summary counts are correct. */
-    struct result **mgr_res =
-        static_cast<struct result **>(
-            calloc(mgr_count ? mgr_count : 1, sizeof *mgr_res));
-    struct result **lang_res =
-        static_cast<struct result **>(
-            calloc(lang_count ? lang_count : 1, sizeof *lang_res));
-    if (mgr_res == nullptr || lang_res == nullptr) {
-        fprintf(stderr, "error: out of memory\n");
-        free(mgr_res);
-        free(lang_res);
-        return;
+    for (std::size_t i = 0; i < n_langs; i++) {
+        const struct result *r = result_at(n_mgrs + i);
+        if (r != nullptr && r->found)
+            std::printf("%-24s %-12s %s\n", langs[i].name, langs[i].binary,
+                        r->version);
+        else
+            std::printf("%-24s %-12s (not installed)\n", langs[i].name,
+                        langs[i].binary);
     }
-
-    std::size_t mgr_found = 0, lang_found = 0;
-    for (std::size_t i = 0; i < mgr_count; i++) {
-        mgr_res[i] = probe(mgrs[i].binary, mgrs[i].version_cmd, nullptr);
-        if (mgr_res[i] != nullptr && mgr_res[i]->found)
-            mgr_found++;
-    }
-    for (std::size_t i = 0; i < lang_count; i++) {
-        lang_res[i] = probe(langs[i].binary, langs[i].version_cmd,
-                            langs[i].filter);
-        if (lang_res[i] != nullptr && lang_res[i]->found)
-            lang_found++;
-    }
-
-    /* Fallback entry used if a per-tool probe failed (out of memory). */
-    static const struct result empty_result{};
-
-    printf("{\n");
-    printf("  \"system\": { \"kernel\": \"%s\", \"release\": \"%s\", "
-           "\"architecture\": \"%s\" },\n", sys_e, rel_e, mach_e);
-    printf("  \"generated_at\": \"%s\",\n", ts);
-    printf("  \"summary\": { \"package_managers_installed\": %zu, "
-           "\"languages_installed\": %zu },\n", mgr_found, lang_found);
-
-    printf("  \"package_managers\": [\n");
-    for (std::size_t i = 0; i < mgr_count; i++)
-        json_entry(mgrs[i].name, mgrs[i].binary,
-                   mgr_res[i] != nullptr ? mgr_res[i] : &empty_result,
-                   i + 1 == mgr_count);
-    printf("  ],\n");
-
-    printf("  \"languages\": [\n");
-    for (std::size_t i = 0; i < lang_count; i++)
-        json_entry(langs[i].name, langs[i].binary,
-                   lang_res[i] != nullptr ? lang_res[i] : &empty_result,
-                   i + 1 == lang_count);
-    printf("  ]\n");
-    printf("}\n");
-
-    for (std::size_t i = 0; i < mgr_count; i++)
-        free(mgr_res[i]);
-    for (std::size_t i = 0; i < lang_count; i++)
-        free(lang_res[i]);
-    free(mgr_res);
-    free(lang_res);
 }
 
-/* ------------------------------------------------------------------ */
-/* Table output (default)                                             */
-/* ------------------------------------------------------------------ */
-
+/* Print the usage/help text. */
 void print_usage(const char *prog)
 {
-    printf("Usage: %s [OPTION]\n\n", prog);
-    printf("Shows package managers and installed programming languages\n");
-    printf("on the current Unix system.\n\n");
-    printf("Options:\n");
-    printf("  -j, --json    Print results as JSON (for scripting)\n");
-    printf("  -h, --help    Show this help and exit\n");
-}
-
-void print_table(const struct pkg_mgr *mgrs, std::size_t mgr_count,
-                 const struct lang *langs, std::size_t lang_count)
-{
-    puts("======================================================");
-    puts(" Unix package managers & installed languages");
-    puts("======================================================");
-    print_os_info();
-    puts("");
-
-    puts("--- Package managers ---");
-    printf("%-26s %-12s %s\n", "NAME", "BINARY", "VERSION");
-    printf("%-26s %-12s %s\n", "----------------------------",
-           "------------", "-------");
-    for (std::size_t i = 0; i < mgr_count; i++) {
-        char version[256] = "";
-        int found = in_path(mgrs[i].binary);
-        if (found)
-            first_line(mgrs[i].version_cmd, nullptr, version,
-                       sizeof version);
-        printf("%-26s %-12s %s\n", mgrs[i].name, mgrs[i].binary,
-               found ? (version[0] ? version : "installed")
-                     : "not installed");
-    }
-
-    puts("");
-    puts("--- Programming languages / runtimes ---");
-    printf("%-26s %-12s %s\n", "NAME", "BINARY", "VERSION");
-    printf("%-26s %-12s %s\n", "----------------------------",
-           "------------", "-------");
-    for (std::size_t i = 0; i < lang_count; i++) {
-        char version[256] = "";
-        int found = in_path(langs[i].binary);
-        if (found)
-            first_line(langs[i].version_cmd, langs[i].filter,
-                       version, sizeof version);
-        printf("%-26s %-12s %s\n", langs[i].name, langs[i].binary,
-               found ? (version[0] ? version : "installed")
-                     : "not installed");
-    }
-
-    puts("");
+    std::printf("Usage: %s [options]\n", prog);
+    std::printf("Report package managers and language runtimes installed on "
+                "this system.\n\n");
+    std::printf("Options:\n");
+    std::printf("  -j, --json    Output as JSON\n");
+    std::printf("  -h, --help    Show this help and exit\n");
 }

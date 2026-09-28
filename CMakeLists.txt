@@ -1,64 +1,44 @@
-# ============================================================================
-# CMakeLists.txt — pkg_lang_info
-#
-# Layout:
-#   include/   public headers  (helpers.h, tables.h, output.h)
-#   src/       implementation (main.cpp, helpers.cpp, tables.cpp, output.cpp)
-#
-# Build:
-#   cmake -B build
-#   cmake --build build
-#   ./build/bin/pkg_lang_info
-# ============================================================================
-
 cmake_minimum_required(VERSION 3.16)
+project(pkg_lang_info VERSION 1.0.0 LANGUAGES CXX)
 
-project(pkg_lang_info
-    VERSION 1.0.0
-    DESCRIPTION "Show installed package managers and programming languages on Unix systems"
-    LANGUAGES CXX
-)
-
-# ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Compiler settings
-# ----------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS ON)   # gnu++17 mode: keeps POSIX APIs (strtok_r, popen) visible
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)  # compile_commands.json for tooling
+set(CMAKE_CXX_EXTENSIONS OFF)
 
-# Default to an optimized build when the user hasn't picked one
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
-    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type (Release/Debug)" FORCE)
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# ----------------------------------------------------------------------------
-# Executable
-# ----------------------------------------------------------------------------
-add_executable(pkg_lang_info
-    src/main.cpp
+# ---------------------------------------------------------------------------
+# Core library: helpers + tables + output (shared by the app and the tests)
+# ---------------------------------------------------------------------------
+add_library(pkg_lang_info_core STATIC
     src/helpers.cpp
     src/tables.cpp
     src/output.cpp
 )
+target_include_directories(pkg_lang_info_core PUBLIC ${CMAKE_SOURCE_DIR}/include)
 
-target_include_directories(pkg_lang_info PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+# ---------------------------------------------------------------------------
+# Executable
+# ---------------------------------------------------------------------------
+add_executable(pkg_lang_info
+    src/main.cpp
 )
+target_link_libraries(pkg_lang_info PRIVATE pkg_lang_info_core)
 
-target_compile_options(pkg_lang_info PRIVATE
-    $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra>
-)
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+enable_testing()
+add_executable(test_pkg_lang_info tests/test_pkg_lang_info.cpp)
+target_link_libraries(test_pkg_lang_info PRIVATE pkg_lang_info_core)
+add_test(NAME pkg_lang_info_smoke COMMAND test_pkg_lang_info)
 
-# Convenience: put the binary in <build>/bin
-set_target_properties(pkg_lang_info PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
-)
-
-# ----------------------------------------------------------------------------
-# Install (optional: cmake --install build  or  make install)
-# ----------------------------------------------------------------------------
-include(GNUInstallDirs)
-install(TARGETS pkg_lang_info
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-)
+# ---------------------------------------------------------------------------
+# Install
+# ---------------------------------------------------------------------------
+install(TARGETS pkg_lang_info RUNTIME DESTINATION bin)
