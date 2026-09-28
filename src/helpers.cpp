@@ -118,12 +118,31 @@ void json_escape(const char *s, char *out, std::size_t out_size)
     out[o] = '\0';
 }
 
+/* Fill in the current system/kernel info (uname). */
+int get_os_info(char *sysname, std::size_t sysname_size,
+                char *release, std::size_t release_size,
+                char *machine, std::size_t machine_size)
+{
+    struct utsname u;
+    if (uname(&u) != 0)
+        return 0;
+
+    if (sysname_size > 0)
+        snprintf(sysname, sysname_size, "%s", u.sysname);
+    if (release_size > 0)
+        snprintf(release, release_size, "%s", u.release);
+    if (machine_size > 0)
+        snprintf(machine, machine_size, "%s", u.machine);
+    return 1;
+}
+
 /* Print the current system/kernel info line. */
 void print_os_info(void)
 {
-    struct utsname u;
-    if (uname(&u) == 0)
-        printf("System: %s %s (%s)\n", u.sysname, u.release, u.machine);
+    char sysname[128], release[128], machine[128];
+    if (get_os_info(sysname, sizeof sysname, release, sizeof release,
+                    machine, sizeof machine))
+        printf("System: %s %s (%s)\n", sysname, release, machine);
     else
         printf("System: unknown (uname failed)\n");
 }

@@ -10,6 +10,7 @@
 #include "helpers.h"
 
 #include <cstdio>
+#include <ctime>
 
 namespace {
 
@@ -23,6 +24,20 @@ int g_n_results = 0;
 const struct result *result_at(std::size_t i)
 {
     return (i < static_cast<std::size_t>(g_n_results)) ? &g_results[i] : nullptr;
+}
+
+/* Current UTC time as an ISO 8601 string (e.g. "2026-01-15T09:32:10Z"). */
+void generated_at(char *out, std::size_t out_size)
+{
+    std::time_t t = std::time(nullptr);
+    std::tm tm_utc;
+    /* gmtime_r is a POSIX extension: declared in the global namespace,
+     * not std (the standard only guarantees std::gmtime, which is not
+     * thread-safe). */
+    if (gmtime_r(&t, &tm_utc) != nullptr)
+        std::strftime(out, out_size, "%Y-%m-%dT%H:%M:%SZ", &tm_utc);
+    else
+        std::snprintf(out, out_size, "unknown");
 }
 
 } // namespace
@@ -59,6 +74,37 @@ void print_json(const struct pkg_mgr *mgrs, std::size_t n_mgrs,
                 const struct lang *langs, std::size_t n_langs)
 {
     std::printf("{\n");
+
+    /* In --json mode the system info lives inside the document (see
+     * main.cpp), so stdout stays pure JSON. */
+    char sysname[128], release[128], machine[128];
+    if (get_os_info(sysname, sizeof sysname, release, sizeof release,
+                    machine, sizeof machine)) {
+        char sn[256], rel[256], mach[256];
+        json_escape(sysname, sn, sizeof sn);
+        json_escape(release, rel, sizeof rel);
+        json_escape(machine, mach, sizeof mach);
+        std::printf("  \"system\": { \"kernel\": \"%s\", \"release\": \"%s\", "
+                    "\"architecture\": \"%s\" },\n", sn, rel, mach);
+    } else {
+        std::printf("  \"system\": null,\n");
+    }
+
+    char ts[32];
+    generated_at(ts, sizeof ts);
+    std::printf("  \"generated_at\": \"%s\",\n", ts);
+
+    std::size_t mgrs_installed = 0, langs_installed = 0;
+    for (std::size_t i = 0; i < n_mgrs; i++)
+        if (result_at(i) != nullptr && result_at(i)->found)
+            mgrs_installed++;
+    for (std::size_t i = 0; i < n_langs; i++)
+        if (result_at(n_mgrs + i) != nullptr && result_at(n_mgrs + i)->found)
+            langs_installed++;
+    std::printf("  \"summary\": { \"package_managers_installed\": %llu, "
+                "\"languages_installed\": %llu },\n",
+                (unsigned long long)mgrs_installed,
+                (unsigned long long)langs_installed);
 
     std::printf("  \"package_managers\": [\n");
     for (std::size_t i = 0; i < n_mgrs; i++) {

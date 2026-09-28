@@ -28,6 +28,14 @@ int first_line(const char *command, const char *filter,
 /* Escape s for safe use inside a JSON string literal. */
 void json_escape(const char *s, char *out, std::size_t out_size);
 
+/*
+ * Fill in the current system/kernel info (uname). Returns 1 on success,
+ * 0 if uname failed. Buffers are NUL-terminated (possibly empty).
+ */
+int get_os_info(char *sysname, std::size_t sysname_size,
+                char *release, std::size_t release_size,
+                char *machine, std::size_t machine_size);
+
 /* Print the current system/kernel info line. */
 void print_os_info(void);
 

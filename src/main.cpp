@@ -32,8 +32,6 @@ int main(int argc, char **argv)
         }
     }
 
-    print_os_info();
-
     std::size_t mgr_count = 0, lang_count = 0;
     const struct pkg_mgr *mgrs = get_pkg_mgrs(&mgr_count);
     const struct lang *langs = get_langs(&lang_count);
@@ -44,10 +42,14 @@ int main(int argc, char **argv)
     for (std::size_t i = 0; i < lang_count; i++)
         probe(langs[i].binary, langs[i].version_cmd, langs[i].filter);
 
-    if (json)
+    if (json) {
+        /* JSON mode: stdout must stay pure JSON, so the system line is
+         * embedded in the document itself (see print_json). */
         print_json(mgrs, mgr_count, langs, lang_count);
-    else
+    } else {
+        print_os_info();
         print_table(mgrs, mgr_count, langs, lang_count);
+    }
 
     return 0;
 }
